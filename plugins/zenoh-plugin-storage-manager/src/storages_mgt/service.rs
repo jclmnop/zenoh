@@ -172,18 +172,22 @@ impl StorageService {
                 tokio::select!(
                     // on sample for key_expr
                     sample = storage_sub.recv_async() => {
-                        let sample = match sample {
-                            Ok(sample) => sample,
-                            Err(e) => {
-                                tracing::error!("Error in sample: {}", e);
-                                continue;
-                            }
-                        };
-                        let timestamp = sample.timestamp().cloned().unwrap_or(self.session.new_timestamp());
-                        let sample = SampleBuilder::from(sample).timestamp(timestamp).into();
-                        if let Err(e) = self.process_sample(sample).await {
-                            tracing::error!("{e:?}");
-                        }
+                        let service = self.clone();
+                        tokio::task::spawn(async move {
+                            match sample {
+                                Ok(sample) => {
+                                    let timestamp = sample.timestamp().cloned().unwrap_or(service.session.new_timestamp());
+                                    let sample = SampleBuilder::from(sample).timestamp(timestamp).into();
+                                    if let Err(e) = service.process_sample(sample).await {
+                                        tracing::error!("{e:?}");
+                                    }
+                                },
+                                Err(e) => {
+                                    tracing::error!("Error in sample: {}", e);
+                                }
+                            };
+
+                        });
                     },
                     // on query on key_expr
                     query = storage_queryable.recv_async() => {
